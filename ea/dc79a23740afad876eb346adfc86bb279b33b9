@@ -1,0 +1,25 @@
+README.md
+  s_8b8037e83fef9f::t_d2213f9cad12d1 2
+web/src/app.html
+  s_8b8037e83fef9f::t_c6834df75e224c 7
+web/src/lib/components/blux/Sidebar.svelte
+  s_8b8037e83fef9f::t_b47dd6ac2f7614 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "eadc79a23740afad876eb346adfc86bb279b33b9",
+  "prompts": {},
+  "sessions": {
+    "s_8b8037e83fef9f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2074a-3a9b-7d43-9878-435b8a5c3813",
+        "model": "unknown"
+      },
+      "human_author": "starnighter <175115251+starnighter@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
