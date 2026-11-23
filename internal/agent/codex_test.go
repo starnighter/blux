@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,6 +65,10 @@ func fakeCodex() {
 			thread = map[string]any{"thread": map[string]any{"id": "native-thread", "status": map[string]string{"type": "idle"}}, "model": "test-model", "modelProvider": "test", "reasoningEffort": cfg["model_reasoning_effort"], "cwd": in.Params["cwd"], "approvalPolicy": in.Params["approvalPolicy"], "sandbox": map[string]any{"type": sandbox, "networkAccess": true, "writableRoots": cfg["sandbox_workspace_write.writable_roots"]}}
 			result = thread
 		case "turn/start":
+			if os.Getenv("BLUX_FAKE_MODE") == "rejected" {
+				send(map[string]any{"id": in.ID, "error": map[string]any{"code": -32000, "message": "rate limit exceeded"}})
+				continue
+			}
 			if expected := os.Getenv("BLUX_FAKE_EFFORT"); expected != "" && in.Params["effort"] != expected {
 				os.Exit(26)
 			}
@@ -88,7 +93,7 @@ func fakeCodex() {
 func TestCodexWireAndFailure(t *testing.T) {
 	exe, _ := os.Executable()
 	t.Setenv("BLUX_FAKE_CODEX", "1")
-	for _, mode := range []string{"ok", "unsafe", "failed"} {
+	for _, mode := range []string{"ok", "unsafe", "failed", "rejected"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("BLUX_FAKE_MODE", mode)
 			root := t.TempDir()
@@ -121,7 +126,16 @@ func TestCodexWireAndFailure(t *testing.T) {
 				}
 				kinds = append(kinds, u.Type)
 			}
+			if mode == "rejected" {
+				if !errors.Is(turnErr, ErrTurnRejectedBeforeStart) || strings.Contains(strings.Join(kinds, ","), "agent.turn.started") {
+					t.Fatal(kinds, turnErr)
+				}
+				return
+			}
 			if mode == "failed" {
+				if errors.Is(turnErr, ErrTurnRejectedBeforeStart) {
+					t.Fatal("accepted turn marked safe to redispatch")
+				}
 				if turnErr == nil || !strings.Contains(turnErr.Error(), "quota") {
 					t.Fatal(turnErr)
 				}

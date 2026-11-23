@@ -35,6 +35,15 @@ func (s *Server) deliveries(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, e)
 		return
 	}
+	if group := r.URL.Query().Get("collaboration_id"); group != "" {
+		filtered := v[:0]
+		for _, d := range v {
+			if d.CollaborationID == group {
+				filtered = append(filtered, d)
+			}
+		}
+		v = filtered
+	}
 	writeJSON(w, 200, map[string]any{"deliveries": v})
 }
 func (s *Server) delivery(w http.ResponseWriter, r *http.Request) {
@@ -73,19 +82,19 @@ func (s *Server) createDelivery(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, prior)
 		return
 	}
-	if in.Adapter == "codex" {
+	if in.Orchestration == "" {
 		if _, e := s.codexStatus(r.Context()); e != nil {
 			s.storeError(w, e)
 			return
 		}
-		repo, e := (workspace.Manager{DataDir: s.DataDir}).Freeze(r.Context(), in.RepositoryPath)
-		if e != nil {
-			s.storeError(w, e)
-			return
-		}
-		in.RepositoryPath = repo.Path
-		in.BaseCommit = repo.BaseCommit
 	}
+	repo, e := (workspace.Manager{DataDir: s.DataDir}).Freeze(r.Context(), in.RepositoryPath)
+	if e != nil {
+		s.storeError(w, e)
+		return
+	}
+	in.RepositoryPath = repo.Path
+	in.BaseCommit = repo.BaseCommit
 	d, e := s.flowService().Create(r.Context(), in, key)
 	if e != nil {
 		s.storeError(w, e)
@@ -126,4 +135,34 @@ func (s *Server) acceptDelivery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, d)
+}
+
+func (s *Server) registerDispatchRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/deliveries/{delivery}/changes", s.deliveryChanges)
+}
+func (s *Server) deliveryChanges(w http.ResponseWriter, r *http.Request) {
+	d, err := s.Store.Delivery(r.Context(), r.PathValue("delivery"))
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	head := d.Head
+	if d.SourceHead != "" {
+		head = d.SourceHead
+	}
+	repo, err := (workspace.Manager{DataDir: s.DataDir}).Resolve(r.Context(), d.RepositoryPath, d.BaseCommit)
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	files, err := workspace.ChangedFiles(r.Context(), repo.Root, d.BaseCommit, head)
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	writeJSON(w, 200, struct {
+		BaseCommit string                  `json:"base_commit"`
+		Head       string                  `json:"head"`
+		Files      []workspace.ChangedFile `json:"files"`
+	}{d.BaseCommit, head, files})
 }

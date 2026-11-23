@@ -85,9 +85,18 @@ func (s *Store) GetControl(ctx context.Context, taskID, key string) (Control, er
 	}
 	return scanControl(s.db.QueryRowContext(ctx, "SELECT "+controlColumns+" FROM controls WHERE id=?", taskID+":"+key))
 }
-func (s *Store) ClaimControl(ctx context.Context, turnID string) (c *Control, err error) {
+func (s *Store) ClaimControl(ctx context.Context, turnID string) (*Control, error) {
+	return s.claimControl(ctx, turnID, "")
+}
+func (s *Store) ClaimStop(ctx context.Context, turnID string) (*Control, error) {
+	return s.claimControl(ctx, turnID, " AND kind IN ('stop','ticket_pause','ticket_cancel')")
+}
+func (s *Store) ClaimSteer(ctx context.Context, turnID string) (*Control, error) {
+	return s.claimControl(ctx, turnID, " AND kind='steer'")
+}
+func (s *Store) claimControl(ctx context.Context, turnID, filter string) (c *Control, err error) {
 	err = s.transaction(ctx, func(q querier) error {
-		v, e := scanControl(q.QueryRowContext(ctx, "SELECT "+controlColumns+" FROM controls WHERE turn_id=? AND status='pending' ORDER BY created_at,id LIMIT 1", turnID))
+		v, e := scanControl(q.QueryRowContext(ctx, "SELECT "+controlColumns+" FROM controls WHERE turn_id=? AND status='pending'"+filter+" ORDER BY created_at,id LIMIT 1", turnID))
 		if errors.Is(e, sql.ErrNoRows) {
 			return nil
 		}
@@ -134,7 +143,40 @@ func (s *Store) RecoverRunning(ctx context.Context) error {
 			return err
 		}
 		for _, j := range jobs {
+			var captured bool
+			exitErr := confirmTicketExit(ctx, q, j.TaskID)
+			if exitErr != nil && !errors.Is(exitErr, core.ErrConflict) {
+				return exitErr
+			}
+			if err = q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM snapshots WHERE capture_key=? AND task_id=? AND generation=?)", j.TurnID, j.TaskID, j.Generation).Scan(&captured); err != nil {
+				return err
+			}
+			if captured && exitErr == nil {
+				if _, err = appendEvent(ctx, q, core.EventInput{TaskID: j.TaskID, SessionID: j.SessionID, TurnID: j.TurnID, Generation: j.Generation, Type: "turn.completed"}); err != nil {
+					return err
+				}
+				if _, err = q.ExecContext(ctx, "UPDATE jobs SET status='completed',ended_at=? WHERE turn_id=?", core.Now(), j.TurnID); err != nil {
+					return err
+				}
+				continue
+			}
 			p := json.RawMessage(`{"code":"recovery_required","message":"上次 Worker 意外退出。已保留会话与文件，请检查结果后提交新回合继续；不会自动重复执行。"}`)
+			if exitErr == nil {
+				var controlID, kind string
+				err = q.QueryRowContext(ctx, "SELECT id,kind FROM controls WHERE turn_id=? AND status IN ('pending','claimed') AND kind IN ('ticket_pause','ticket_cancel','stop') ORDER BY created_at,id LIMIT 1", j.TurnID).Scan(&controlID, &kind)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+				if err == nil {
+					if kind == "stop" {
+						kind = "user_stopped"
+					}
+					p, _ = json.Marshal(map[string]string{"code": kind, "message": "已确认原执行进程退出，工作区已保留。"})
+					if _, err = q.ExecContext(ctx, "UPDATE controls SET status='applied' WHERE id=?", controlID); err != nil {
+						return err
+					}
+				}
+			}
 			if _, err = appendEvent(ctx, q, core.EventInput{TaskID: j.TaskID, SessionID: j.SessionID, TurnID: j.TurnID, Generation: j.Generation, Type: "turn.failed", Payload: p}); err != nil {
 				return err
 			}
@@ -146,4 +188,31 @@ func (s *Store) RecoverRunning(ctx context.Context) error {
 		_, err = q.ExecContext(ctx, "UPDATE controls SET status='rejected',error='执行已结束或 Worker 中断；控制操作未重放' WHERE status IN ('pending','claimed') AND turn_id NOT IN (SELECT turn_id FROM jobs WHERE status='queued')")
 		return err
 	})
+}
+
+// The CLI can finish and commit its snapshot just before cancellation or loss
+// of the completion response. That capture identifies the successful turn.
+func (s *Store) FinishFailedTurn(ctx context.Context, j core.Job, payload json.RawMessage) error {
+	var status string
+	var captured bool
+	if err := s.db.QueryRowContext(ctx, `SELECT u.status,EXISTS(SELECT 1 FROM snapshots s
+        WHERE s.capture_key=u.id AND s.generation=u.generation AND s.task_id=u.task_id)
+        FROM turns u WHERE u.id=? AND u.generation=? AND u.task_id=?`, j.TurnID, j.Generation, j.TaskID).Scan(&status, &captured); err != nil {
+		return err
+	}
+	if core.IsTerminal(status) {
+		return nil
+	}
+	kind := "turn.failed"
+	if captured {
+		err := confirmTicketExit(ctx, s.db, j.TaskID)
+		if err != nil && !errors.Is(err, core.ErrConflict) {
+			return err
+		}
+		if err == nil {
+			kind, payload = "turn.completed", json.RawMessage(`{}`)
+		}
+	}
+	_, _, err := s.AppendEvent(ctx, core.EventInput{TaskID: j.TaskID, SessionID: j.SessionID, TurnID: j.TurnID, Generation: j.Generation, Type: kind, Payload: payload})
+	return err
 }

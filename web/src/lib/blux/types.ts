@@ -13,6 +13,7 @@ export interface CreateTaskOptions {
 }
 
 export interface Task {
+  ticket_status?: string;
  pinned_at?:string;
  collaboration_id?:string;
   id: string;
@@ -117,7 +118,7 @@ export interface BluxEvent {
   generation: number;
   seq: number;
   type: string;
-  payload: unknown;
+  payload: { code?: string; message?: string; [key: string]: unknown };
   created_at: string;
 }
 

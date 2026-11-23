@@ -55,7 +55,12 @@ func TestRetiredSimulatorMigrationPreservesRealHistoryAndSharedBlobs(t *testing.
 	if _, e = s.db.Exec("UPDATE tasks SET adapter='demo' WHERE id=?", oldID); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = s.db.Exec("DROP TABLE pending_cleanup;ALTER TABLE turns DROP COLUMN reasoning_effort;PRAGMA user_version=10"); e != nil {
+	if _, e = s.db.Exec(`DROP TABLE ticket_actions;
+        DROP TABLE attempt_turns; DROP TABLE ticket_attempts; DROP TABLE tickets; DROP TABLE engine_health;
+        DROP TABLE snapshot_comments; DROP INDEX snapshot_task_version;
+        ALTER TABLE snapshots DROP COLUMN turn_id; ALTER TABLE snapshots DROP COLUMN parent_snapshot_id;
+        ALTER TABLE snapshots RENAME COLUMN capture_key TO turn_id; ALTER TABLE acceptances DROP COLUMN selection;
+        DROP TABLE pending_cleanup;ALTER TABLE turns DROP COLUMN reasoning_effort;PRAGMA user_version=10`); e != nil {
 		t.Fatal(e)
 	}
 	s.Close()

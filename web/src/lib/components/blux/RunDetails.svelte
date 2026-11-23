@@ -1,6 +1,11 @@
 <script lang="ts">
- import {agentName} from '$lib/blux/agents';
+ import {agentName, type AgentInfo} from '$lib/blux/agents';
+ import TicketDetails from './TicketDetails.svelte';
+ export let agents:AgentInfo[]=[];
+ export let manager=false;
+ export let onChange:()=>void=()=>{};
   // Blux-specific execution facts beside the adapted Open WebUI chat.
+  import {statusLabels} from '$lib/blux/collaborations';
   import ContextPanel from './ContextPanel.svelte';
   import type { BluxEvent, Health, RuntimeInfo, Task, TokenUsage, Turn } from '$lib/blux/types';
   import XMark from '$lib/upstream/open-webui/icons/XMark.svelte';
@@ -25,9 +30,6 @@
     'tool.completed': '工具执行完成', 'file.changed': '文件已变更',
     'usage.updated': '用量已更新', 'agent.warning': 'Agent 提示',
     'turn.completed': '本轮执行完成', 'turn.failed': '本轮执行失败'
-  };
-  const statusLabels: Record<string, string> = {
-    queued: '排队中', running: '执行中', completed: '已完成', failed: '未完成'
   };
   const usageKeys: Array<keyof TokenUsage> = ['input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_output_tokens', 'total_tokens'];
   $: usage = turns.reduce<TokenUsage>((total, turn) => {
@@ -55,9 +57,10 @@
     <section class="runtime-summary">
       <div><span>执行器</span><strong>{agentName(task?.adapter||'codex')}</strong></div>
       <div><span>Worker</span><strong>{serviceOffline ? '服务不可达' : health?.worker.online ? '在线' : '离线'}</strong></div>
-      <div><span>状态</span><strong>{task ? statusLabels[task.status] || task.status : '未选择任务'}</strong></div>
+      <div><span>状态</span><strong>{task ? statusLabels[task.ticket_status || task.status] || task.status : '未选择任务'}</strong></div>
     </section>
     {#if task}
+      {#if !manager}{#key task.id}<TicketDetails taskID={task.id} {agents} {onChange}/>{/key}{/if}
       <details class="runtime-metadata">
         <summary>工作区<ChevronDown className="size-3" /></summary>
         <dl>

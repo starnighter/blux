@@ -3,6 +3,7 @@ package httpapi
 import (
 	"blux/internal/core"
 	"blux/internal/store"
+	"blux/internal/workspace"
 	"context"
 	"errors"
 	"io"
@@ -60,11 +61,11 @@ func (s *Server) workspaceSource(r *http.Request) (workspaceSource, error) {
 		} else {
 			// A selected project may be a subdirectory; the task worktree is rooted
 			// at the repository, and historical trees must use that same root.
-			root, _, err := workspaceGit(r.Context(), source.root, 64<<10, "rev-parse", "--show-toplevel")
+			repo, err := (workspace.Manager{DataDir: s.DataDir}).Resolve(r.Context(), source.root, d.Task.BaseCommit)
 			if err != nil {
 				return source, core.ErrNotFound
 			}
-			source.root = strings.TrimSpace(string(root))
+			source.root = repo.Root
 		}
 	}
 	return source, nil

@@ -1,0 +1,1 @@
+ALTER TABLE acceptances ADD COLUMN selection TEXT NOT NULL DEFAULT '';

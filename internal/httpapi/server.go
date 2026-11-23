@@ -44,6 +44,9 @@ type Server struct {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.registerTicketRoutes(mux)
+	s.registerDispatchRoutes(mux)
+	s.registerWorkbenchRoutes(mux)
 	mux.HandleFunc("GET /api/v1/health", s.health)
 	mux.HandleFunc("GET /api/v1/agents", s.agents)
 	mux.HandleFunc("GET /api/v1/agents/{agent}/models", s.models)
@@ -329,7 +332,7 @@ func (s *Server) storeError(w http.ResponseWriter, err error) {
 		if (strings.HasPrefix(executionError.Code, "codex_") || strings.HasPrefix(executionError.Code, "claude_") || strings.HasPrefix(executionError.Code, "deepseek_") || strings.HasPrefix(executionError.Code, "gemini_")) || executionError.Code == "git_not_found" {
 			status = http.StatusServiceUnavailable
 		}
-		if executionError.Code == "repository_dirty" {
+		if executionError.Code == "repository_dirty" || errors.Is(err, core.ErrConflict) {
 			status = http.StatusConflict
 		}
 		writeError(w, status, executionError.Code, executionError.Message)

@@ -59,7 +59,7 @@ func ProbeClaude(ctx context.Context, binary string) (info ClaudeInfo, err error
 }
 func (c Claude) Name() string { return "claude" }
 func (c Claude) Capabilities() Capabilities {
-	return Capabilities{Streaming: true, Resume: true, Interrupt: true}
+	return Capabilities{Sandbox: true, NetworkControl: true, FileAccess: true, ToolControl: true, UsageReporting: true, Streaming: true, Resume: true, Interrupt: true}
 }
 func (c Claude) Start(ctx context.Context, config SessionConfig) (Session, error) {
 	if config.ThreadID != "" {

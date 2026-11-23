@@ -91,7 +91,7 @@ func probeCommand(ctx context.Context, binary string, args ...string) (string, e
 
 func (c Codex) Name() string { return "codex" }
 func (c Codex) Capabilities() Capabilities {
-	return Capabilities{Streaming: true, Resume: true, Steer: true, Interrupt: true}
+	return Capabilities{Sandbox: true, NetworkControl: true, FileAccess: true, UsageReporting: true, Streaming: true, Resume: true, Steer: true, Interrupt: true}
 }
 
 func (c Codex) Start(ctx context.Context, config SessionConfig) (Session, error) {

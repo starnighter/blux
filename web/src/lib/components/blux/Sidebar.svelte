@@ -10,6 +10,7 @@
   export let onDelete:(target:DeletionTarget)=>void=()=>{};
   export let width=248;export let maxWidth=400;export let onResize:(width:number)=>void=()=>{};export let onResizeEnd:()=>void=()=>{};
   export let open=true;export let mobile=false;export let tasks:Task[]=[];export let collaborations:Collaboration[]=[];export let selectedId:string|null=null;export let selectedCollaboration='';export let section='tasks';export let loading=false;export let error='';export let submitting=false;export let dark=false;
+  export let onFlows:()=>void=()=>{};
   export let onSelect:(id:string|null)=>void=()=>{};export let onRefresh:()=>void=()=>{};export let onToggleTheme:()=>void=()=>{};export let onManager:()=>void=()=>{};export let onDeliveries:()=>void=()=>{};export let onCollaboration:(id:string)=>void=()=>{};export let onCreateCollaboration:()=>void=()=>{};export let onProjects:()=>void=()=>{};
   let search='';let searchOpen=false;let more=false;
   $: personal=pinnedFirst(tasks.filter(t=>!t.collaboration_id&&`${t.title} ${t.prompt}`.toLocaleLowerCase().includes(search.toLocaleLowerCase().trim())),t=>t.updated_at);
@@ -29,6 +30,7 @@
    {#if searchOpen}<div class="sidebar-search"><Icon name="search" size={15}/><input id="task-search" aria-label="搜索任务" type="search" bind:value={search} placeholder="搜索任务与协作"/></div>{/if}
    <div class="sidebar-sections-scroll">
     <section class="sidebar-section"><h2>Agent 协作</h2><div class="sidebar-section-entry" class:active={section==='collaborations'&&!selectedCollaboration}><button class="sidebar-section-link" aria-current={section==='collaborations'&&!selectedCollaboration?'page':undefined} on:click={()=>navigate(onDeliveries)}><Icon name="team"/>协作任务</button><button class="ui-icon-button" aria-label="新建协作" on:click={()=>navigate(onCreateCollaboration)}><Icon name="plus" size={18}/></button></div>
+    <button class="sidebar-new" class:active={section==='flows'} on:click={()=>navigate(onFlows)}><Icon name="spark"/>流程交付</button>
     {#if pinnedGroups.length}<h3>已置顶</h3>{#each pinnedGroups as c}<SidebarItem target={{kind:'collaboration',id:c.id,title:c.title}} pinnedAt={c.pinned_at||''} selected={section==='collaborations'&&selectedCollaboration===c.id} running={c.status==='running'} disabled={submitting} pinPending={pinning.has(`collaboration:${c.id}`)} onSelect={()=>navigate(()=>onCollaboration(c.id))} {onDelete} {onPin}/>{/each}{/if}
     {#if recentCollaborations.length}<h3>最近协作</h3>{#each recentCollaborations as c}<SidebarItem target={{kind:'collaboration',id:c.id,title:c.title}} selected={section==='collaborations'&&selectedCollaboration===c.id} running={c.status==='running'} disabled={submitting} pinPending={pinning.has(`collaboration:${c.id}`)} onSelect={()=>navigate(()=>onCollaboration(c.id))} {onDelete} {onPin}/>{/each}{/if}{#if groups.length-pinnedGroups.length>4}<button class="sidebar-show-more" on:click={()=>navigate(onDeliveries)}>查看全部协作</button>{/if}
     </section>

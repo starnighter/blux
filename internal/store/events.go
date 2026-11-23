@@ -173,7 +173,9 @@ func (s *Store) AppendEvent(ctx context.Context, in core.EventInput) (core.Event
 			}
 			_, err = q.ExecContext(ctx, "UPDATE jobs SET status = ?,ended_at = ? WHERE turn_id = ? AND generation = ? AND status = 'running'", terminal, result.CreatedAt, in.TurnID, in.Generation)
 			if err == nil {
-				_, err = q.ExecContext(ctx, "UPDATE controls SET status='rejected',error='回合已结束，操作未执行' WHERE turn_id=? AND status='pending'", in.TurnID)
+				_, err = q.ExecContext(ctx, `UPDATE controls SET status=CASE WHEN status='claimed' AND
+                      (kind=json_extract(?,'$.code') OR kind='stop' AND json_extract(?,'$.code')='user_stopped') THEN 'applied' ELSE 'rejected' END
+                      WHERE turn_id=? AND status IN ('pending','claimed')`, string(in.Payload), string(in.Payload), in.TurnID)
 			}
 		}
 		return err
@@ -200,32 +202,33 @@ func appendEvent(ctx context.Context, q querier, in core.EventInput) (core.Event
 	if err = projectEvent(ctx, q, e); err != nil {
 		return core.Event{}, err
 	}
-	return e, nil
+	return e, updateTicketForEvent(ctx, q, e)
 }
 
 type eventPayload struct {
-	Title           string            `json:"title"`
-	Prompt          string            `json:"prompt"`
-	Adapter         string            `json:"adapter"`
-	MessageID       string            `json:"message_id"`
-	Text            string            `json:"text"`
-	ToolCallID      string            `json:"tool_call_id"`
-	Name            string            `json:"name"`
-	Input           string            `json:"input"`
-	Output          string            `json:"output"`
-	Summary         string            `json:"summary"`
-	Code            string            `json:"code"`
-	Message         string            `json:"message"`
-	RepositoryPath  string            `json:"repository_path"`
-	BaseCommit      string            `json:"base_commit"`
-	Model           string            `json:"model"`
-	ModelProvider   string            `json:"model_provider"`
-	ReasoningEffort string            `json:"reasoning_effort"`
-	NativeTurnID    string            `json:"native_turn_id"`
-	ItemID          string            `json:"item_id"`
-	Delta           string            `json:"delta"`
-	Changes         []core.FileChange `json:"changes"`
-	Status          string            `json:"status"`
+	RejectedBeforeStart bool              `json:"rejected_before_start,omitempty"`
+	Title               string            `json:"title"`
+	Prompt              string            `json:"prompt"`
+	Adapter             string            `json:"adapter"`
+	MessageID           string            `json:"message_id"`
+	Text                string            `json:"text"`
+	ToolCallID          string            `json:"tool_call_id"`
+	Name                string            `json:"name"`
+	Input               string            `json:"input"`
+	Output              string            `json:"output"`
+	Summary             string            `json:"summary"`
+	Code                string            `json:"code"`
+	Message             string            `json:"message"`
+	RepositoryPath      string            `json:"repository_path"`
+	BaseCommit          string            `json:"base_commit"`
+	Model               string            `json:"model"`
+	ModelProvider       string            `json:"model_provider"`
+	ReasoningEffort     string            `json:"reasoning_effort"`
+	NativeTurnID        string            `json:"native_turn_id"`
+	ItemID              string            `json:"item_id"`
+	Delta               string            `json:"delta"`
+	Changes             []core.FileChange `json:"changes"`
+	Status              string            `json:"status"`
 }
 
 func projectEvent(ctx context.Context, q querier, e core.Event) error {
@@ -242,6 +245,14 @@ func projectEvent(ctx context.Context, q querier, e core.Event) error {
 			return err
 		}
 		if _, err := q.ExecContext(ctx, "UPDATE sessions SET runtime_json='{}' WHERE id=?", e.SessionID); err != nil {
+			return err
+		}
+	case "ticket.engine_switched":
+		if _, err := q.ExecContext(ctx, "UPDATE tasks SET adapter=?,model='',model_provider='' WHERE id=?", p.Adapter, e.TaskID); err != nil {
+			return err
+		}
+		if _, err := q.ExecContext(ctx, `UPDATE sessions SET runtime_json=json_remove(runtime_json,
+          '$.native_thread_id','$.model','$.model_provider','$.reasoning_effort','$.cli_version','$.context_usage') WHERE id=?`, e.SessionID); err != nil {
 			return err
 		}
 	case "turn.queued":
