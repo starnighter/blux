@@ -72,6 +72,15 @@ func newHeadlessState(a Headless, c SessionConfig, info CLIInfo, turn string, em
 }
 func (s *headlessState) textItem() string { return fmt.Sprintf("%s-step-%d", s.turn, s.step) }
 func (s *headlessState) fail(code, message string) error {
+	if code == "execution_failed" || code == "agent_error" {
+		text := strings.ToLower(message)
+		switch {
+		case strings.Contains(text, "quota") || strings.Contains(text, "rate limit") || strings.Contains(text, "429"):
+			code = "usage_limit"
+		case strings.Contains(text, "unauthorized") || strings.Contains(text, "authentication required") || strings.Contains(text, "invalid api key"):
+			code = "auth_required"
+		}
+	}
 	return s.adapter.failure(code, core.OutputTail(message), nil)
 }
 func (s *headlessState) consume(raw []byte) error {

@@ -33,7 +33,7 @@ func object(props map[string]any, required ...string) map[string]any {
 }
 func str() map[string]string { return map[string]string{"type": "string"} }
 func tools() []tool {
-	return []tool{{"list_tasks", "查询本地任务状态。", object(map[string]any{})}, {"get_task", "查询任务最近回复与状态。", object(map[string]any{"task_id": str()}, "task_id")}, {"list_deliveries", "查询交付流程与人工验收关口。", object(map[string]any{})}, {"get_delivery", "查询交付精确阶段和版本。", object(map[string]any{"delivery_id": str()}, "delivery_id")}, {"create_task", "在用户已选择的项目中创建独立执行任务。必须使用稳定的幂等键。", object(map[string]any{"prompt": str(), "mode": map[string]any{"type": "string", "enum": []string{"spec", "development", "analysis", "explore"}}, "adapter": map[string]any{"type": "string", "enum": []string{"codex"}}, "idempotency_key": str()}, "prompt", "idempotency_key")}, {"start_delivery", "从一句目标启动设计、开发和验证交付。设计与验证都等待用户人工验收。", object(map[string]any{"goal": str(), "adapter": map[string]any{"type": "string", "enum": []string{"codex"}}, "idempotency_key": str()}, "goal", "idempotency_key")}, {"request_review", "通知用户当前阶段需要人工验收；不会通过验收或推进流程。", object(map[string]any{"delivery_id": str(), "phase_id": str(), "generation": map[string]string{"type": "integer"}, "message": str()}, "delivery_id", "phase_id", "generation", "message")}}
+	return []tool{{"list_tasks", "查询本地任务状态。", object(map[string]any{})}, {"get_task", "查询任务最近回复与状态。", object(map[string]any{"task_id": str()}, "task_id")}, {"list_deliveries", "查询交付流程与人工验收关口。", object(map[string]any{})}, {"get_delivery", "查询交付精确阶段和版本。", object(map[string]any{"delivery_id": str()}, "delivery_id")}, {"create_task", "在用户已选择的项目中创建独立执行任务。必须使用稳定的幂等键。", object(map[string]any{"prompt": str(), "mode": map[string]any{"type": "string", "enum": []string{"spec", "development", "analysis", "explore"}}, "adapter": map[string]any{"type": "string", "enum": []string{"codex"}}, "idempotency_key": str()}, "prompt", "idempotency_key")}, {"start_delivery", "从一句目标启动交付。智能编排支持根据计划拆解工单、分派 Agent、交叉讨论、独立审查及验证。", object(map[string]any{"goal": str(), "adapter": map[string]any{"type": "string", "enum": []string{"codex"}}, "idempotency_key": str(), "orchestration": map[string]any{"type": "string", "enum": []string{"smart"}}, "strategy": map[string]any{"type": "string", "enum": []string{"auto", "chain", "fan_out", "discussion", "review", "verify"}}, "agents": map[string]any{"type": "array", "items": str()}, "input_snapshot_ids": map[string]any{"type": "array", "items": str()}, "collaboration_id": str()}, "goal", "idempotency_key")}, {"request_review", "通知用户当前阶段需要人工验收；不会通过验收或推进流程。", object(map[string]any{"delivery_id": str(), "phase_id": str(), "generation": map[string]string{"type": "integer"}, "message": str()}, "delivery_id", "phase_id", "generation", "message")}}
 }
 func (s Server) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 	scanner := bufio.NewScanner(in)
@@ -200,9 +200,14 @@ func (s Server) call(ctx context.Context, name string, b json.RawMessage) (any, 
 		return d, e
 	case "start_delivery":
 		var p struct {
-			Goal    string `json:"goal"`
-			Adapter string `json:"adapter"`
-			Key     string `json:"idempotency_key"`
+			Goal             string   `json:"goal"`
+			Orchestration    string   `json:"orchestration"`
+			Strategy         string   `json:"strategy"`
+			Agents           []string `json:"agents"`
+			InputSnapshotIDs []string `json:"input_snapshot_ids"`
+			CollaborationID  string   `json:"collaboration_id"`
+			Adapter          string   `json:"adapter"`
+			Key              string   `json:"idempotency_key"`
 		}
 		if e := decode(b, &p); e != nil {
 			return nil, e
@@ -214,7 +219,7 @@ func (s Server) call(ctx context.Context, name string, b json.RawMessage) (any, 
 			return nil, core.ErrInvalidState
 		}
 		service := flow.Service{Store: s.Store, DataDir: s.DataDir}
-		in := flow.CreateInput{Goal: p.Goal, Adapter: p.Adapter, RepositoryPath: s.Project}
+		in := flow.CreateInput{Orchestration: p.Orchestration, Strategy: p.Strategy, Agents: p.Agents, CollaborationID: p.CollaborationID, InputSnapshotIDs: p.InputSnapshotIDs, Goal: p.Goal, Adapter: p.Adapter, RepositoryPath: s.Project}
 		if d, found, e := service.LookupCreate(ctx, in, "mcp:"+p.Key); found || e != nil {
 			return d, e
 		}

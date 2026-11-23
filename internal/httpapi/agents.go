@@ -3,6 +3,7 @@ package httpapi
 import (
 	"blux/internal/agent"
 	"blux/internal/core"
+	"blux/internal/store"
 	"context"
 	"net/http"
 	"time"
@@ -28,6 +29,8 @@ func (s *Server) checkAdapter(ctx context.Context, id string) error {
 
 func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
 	type entry struct {
+		Policy       agent.Policy       `json:"policy"`
+		Health       store.EngineHealth `json:"health"`
 		ID           string             `json:"id"`
 		Name         string             `json:"name"`
 		Available    bool               `json:"available"`
@@ -54,6 +57,22 @@ func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
 			item.Reason = e.Error()
 		}
 		out = append(out, item)
+	}
+	health, err := s.Store.EngineHealth(r.Context())
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	for i := range out {
+		e := &out[i]
+		e.Policy = agent.ExecutionPolicy(e.ID)
+		e.Health = health[e.ID]
+		if e.Health.Status == "" {
+			e.Health.Status = "unknown"
+		}
+		if !e.Available {
+			e.Health.Status = "unavailable"
+		}
 	}
 	writeJSON(w, 200, map[string]any{"agents": out})
 }

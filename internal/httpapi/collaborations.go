@@ -6,6 +6,7 @@ import (
 	"blux/internal/workspace"
 	"net/http"
 	"path/filepath"
+	"slices"
 )
 
 func (s *Server) collaborations(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +68,7 @@ func (s *Server) addAgentTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		ArtifactIDs     []string `json:"artifact_ids"`
 		Model           string   `json:"model"`
 		ModelProvider   string   `json:"model_provider"`
 		ReasoningEffort string   `json:"reasoning_effort"`
@@ -92,6 +94,11 @@ func (s *Server) addAgentTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := core.CreateTaskInput{CollaborationID: group.ID, Model: body.Model, ReasoningEffort: body.ReasoningEffort, ModelProvider: body.ModelProvider, Title: body.Title, Prompt: body.Prompt, RepositoryPath: group.RepositoryPath, Adapter: body.Adapter, Mode: body.Mode, ContextIDs: append(append([]string{}, group.ContextIDs...), body.ContextIDs...), IdempotencyKey: "collaboration:" + group.ID + ":" + key}
+	if body.ArtifactIDs != nil {
+		slices.Sort(body.ArtifactIDs)
+		in.PinnedInputs = true
+		in.InputArtifacts = slices.Compact(body.ArtifactIDs)
+	}
 	if d, found, e := s.Store.LookupTaskCreation(r.Context(), in); e != nil {
 		s.storeError(w, e)
 		return
@@ -116,13 +123,27 @@ func (s *Server) addAgentTask(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, e)
 		return
 	}
-	latest := map[string]store.SharedSnapshot{}
-	for _, v := range versions {
-		latest[v.TaskID] = v
-	}
-	for _, task := range group.Tasks {
-		if v, ok := latest[task.ID]; ok {
+	if in.PinnedInputs {
+		shared := map[string]bool{}
+		for _, v := range versions {
 			for _, a := range v.Artifacts {
+				shared[a.ID] = true
+			}
+		}
+		for _, id := range in.InputArtifacts {
+			if !shared[id] {
+				writeError(w, 400, "invalid_input", "交接文件必须属于本协作中已完成的快照。")
+				return
+			}
+		}
+	}
+	if !in.PinnedInputs {
+		latest := map[string]store.SharedSnapshot{}
+		for _, v := range versions {
+			latest[v.TaskID] = v
+		}
+		for _, task := range group.Tasks {
+			for _, a := range latest[task.ID].Artifacts {
 				in.InputArtifacts = append(in.InputArtifacts, a.ID)
 			}
 		}

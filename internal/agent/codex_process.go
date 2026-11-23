@@ -305,7 +305,14 @@ func (s *codexSession) call(ctx context.Context, method string, params any, targ
 		if strings.Contains(text, "unauthorized") || strings.Contains(text, "authentication") || strings.Contains(text, "api key") {
 			code, message = "codex_auth_required", "Codex 凭据不可用，请先在现有 Codex CLI 中完成配置。"
 		}
-		return executionError(code, message, fmt.Errorf("%s failed with RPC code %d", method, envelope.Error.Code))
+		if strings.Contains(text, "quota") || strings.Contains(text, "rate limit") || strings.Contains(text, "usage limit") {
+			code, message = "codex_usage_limit", "Codex 服务额度或请求频率已达上限。"
+		}
+		cause := fmt.Errorf("%s failed with RPC code %d", method, envelope.Error.Code)
+		if method == "turn/start" && (code == "codex_usage_limit" || code == "codex_auth_required") {
+			cause = errors.Join(cause, ErrTurnRejectedBeforeStart)
+		}
+		return executionError(code, message, cause)
 	}
 	if len(envelope.Result) == 0 || string(envelope.Result) == "null" {
 		return executionError("codex_protocol_error", "Codex 响应缺少有效结果。", nil)

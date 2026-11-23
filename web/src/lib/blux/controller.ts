@@ -41,6 +41,7 @@ export function createWorkbench() {
 	let eventTimer: number | undefined;
 	let pollTimer: number | undefined;
 	const requests = new Set<AbortController>();
+	const syncingDetails = new Set<string>();
 
 	function patch(change: Partial<WorkbenchState>) {
 		current = { ...current, ...change };
@@ -76,6 +77,9 @@ export function createWorkbench() {
 			if (!running || epoch !== lifecycle || requestID !== tasksRequest) return;
 			const tasks=response.tasks||[];const selected=tasks.find(t=>t.id===current.detail?.task.id);
 			patch({tasks,tasksError:'',tasksLoading:false,...(current.detail&&selected?{detail:{...current.detail,task:{...current.detail.task,pinned_at:selected.pinned_at}}}:{})});
+			if (current.detail && selected && selected.last_event_seq > current.detail.task.last_event_seq) {
+				void syncDetail(selected.id);
+			}
 		} catch (error) {
 			if (running && epoch === lifecycle && requestID === tasksRequest) {
 				patch({ tasksError: errorText(error), tasksLoading: false });
@@ -125,6 +129,13 @@ export function createWorkbench() {
 				patch({ detailError: errorText(error), detailLoading: false });
 			}
 		}
+	}
+
+	async function syncDetail(id: string) {
+		if (syncingDetails.has(id)) return;
+		syncingDetails.add(id);
+		try { await loadDetail(id); }
+		finally { syncingDetails.delete(id); }
 	}
 
 	function closeStream() {
@@ -178,7 +189,7 @@ export function createWorkbench() {
 				eventTimer = window.setTimeout(() => {
 					eventTimer = undefined;
 					if (!isCurrent()) return;
-					void loadDetail(id);
+					void syncDetail(id);
 					void loadTasks();
 				}, 100);
 			}

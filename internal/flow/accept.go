@@ -35,8 +35,13 @@ func (s Service) Accept(ctx context.Context, id, key string, generation int64) (
 	if d.Run.Generation != generation {
 		return d, core.ErrStaleGeneration
 	}
-	if d.Status != "completed" || d.Adapter != "codex" {
+	if d.Status != "completed" || (d.Orchestration != "smart" && d.Adapter != "codex") {
 		return d, core.ErrInvalidState
+	}
+	if d.Orchestration == "smart" {
+		if err = s.verifySource(ctx, d, d.AcceptanceCommit != ""); err != nil {
+			return d, err
+		}
 	}
 	expected := d.Revision
 	save := func() (flowmodel.Delivery, error) {
@@ -56,6 +61,11 @@ func (s Service) Accept(ctx context.Context, id, key string, generation int64) (
 			return d, err
 		}
 		expected = d.Revision
+		if d.Orchestration == "smart" {
+			if e = s.verifySource(ctx, d, recovering); e != nil {
+				return d, e
+			}
+		}
 		if e = m.ApplySnapshot(ctx, d.RepositoryPath, d.BaseCommit, d.Head, recovering); e != nil {
 			d.Reason = e.Error()
 		} else {
@@ -83,6 +93,9 @@ func (s Service) Accept(ctx context.Context, id, key string, generation int64) (
 	if e != nil {
 		return d, e
 	}
+	if d.Orchestration == "smart" && base != d.BaseCommit {
+		return d, core.ErrConflict
+	}
 	path := filepath.Join(s.DataDir, "integrations", fmt.Sprintf("%s-g%d", id, generation))
 	d.IntegrationPath = path
 	if _, e = os.Stat(path); os.IsNotExist(e) {
@@ -107,6 +120,19 @@ func (s Service) Accept(ctx context.Context, id, key string, generation int64) (
 	d.AcceptanceCommit, err = git(ctx, path, "rev-parse", "HEAD")
 	if err != nil {
 		return
+	}
+	if d.Orchestration == "smart" {
+		actual, e := git(ctx, path, "rev-parse", "HEAD^{tree}")
+		if e != nil {
+			return d, e
+		}
+		reviewed, e := git(ctx, path, "rev-parse", d.Head+"^{tree}")
+		if e != nil {
+			return d, e
+		}
+		if actual != reviewed {
+			return d, fmt.Errorf("整合区与已验证候选不一致: %w", core.ErrConflict)
+		}
 	}
 	d.AcceptanceBase = base
 	d.Reason = ""

@@ -33,7 +33,7 @@ func (a Headless) label() string {
 	return "Gemini CLI"
 }
 func (a Headless) Capabilities() Capabilities {
-	return Capabilities{Streaming: true, Resume: true, Interrupt: true}
+	return Capabilities{Sandbox: true, FileAccess: a.ID == "deepseek", UsageReporting: true, Streaming: true, Resume: true, Interrupt: true}
 }
 func (a Headless) failure(code, message string, err error) error {
 	return executionError(a.ID+"_"+code, a.label()+"："+message, err)

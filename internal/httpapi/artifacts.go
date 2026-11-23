@@ -3,6 +3,7 @@ package httpapi
 import (
 	"blux/internal/artifact"
 	"blux/internal/store"
+	"encoding/json"
 	"mime"
 	"net/http"
 	"os"
@@ -69,7 +70,20 @@ func (s *Server) acceptSnapshot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	a, err := (artifact.Service{Store: s.Store, DataDir: s.DataDir}).Accept(r.Context(), r.PathValue("snapshot"), key)
+	var paths []string
+	if r.ContentLength != 0 {
+		var input *struct {
+			Paths json.RawMessage `json:"paths"`
+		}
+		if !readJSON(w, r, &input) {
+			return
+		}
+		if input == nil || input.Paths != nil && (json.Unmarshal(input.Paths, &paths) != nil || len(paths) == 0) {
+			writeError(w, http.StatusBadRequest, "invalid_selection", "请选择至少一个变更文件。")
+			return
+		}
+	}
+	a, err := (artifact.Service{Store: s.Store, DataDir: s.DataDir}).AcceptPaths(r.Context(), r.PathValue("snapshot"), key, paths)
 	if err != nil {
 		s.storeError(w, err)
 		return

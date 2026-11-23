@@ -6,6 +6,9 @@ import (
 	"blux/internal/store"
 	"blux/internal/workspace"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -13,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -115,7 +119,11 @@ func (s Service) Capture(ctx context.Context, j core.Job, rt core.RuntimeInfo) e
 // Accept validates an immutable snapshot in a separate integration worktree.
 // The source working tree is touched only by the final explicit fast-forward.
 func (s Service) Accept(ctx context.Context, snapshotID, key string) (a store.Acceptance, err error) {
-	if key == "" {
+	return s.AcceptPaths(ctx, snapshotID, key, nil)
+}
+
+func (s Service) AcceptPaths(ctx context.Context, snapshotID, key string, paths []string) (a store.Acceptance, err error) {
+	if key == "" || paths != nil && len(paths) == 0 {
 		return a, core.ErrInvalidState
 	}
 	if err = os.MkdirAll(filepath.Join(s.DataDir, "locks"), 0700); err != nil {
@@ -130,10 +138,18 @@ func (s Service) Accept(ctx context.Context, snapshotID, key string) (a store.Ac
 	if err != nil {
 		return
 	}
+	selection := ""
+	if paths != nil {
+		paths = slices.Clone(paths)
+		slices.Sort(paths)
+		encoded, _ := json.Marshal(slices.Compact(paths))
+		digest := sha256.Sum256(encoded)
+		selection = hex.EncodeToString(digest[:])
+	}
 	id := v.TaskID + ":" + key
 	a, e = s.Store.GetAcceptance(ctx, id)
 	if e == nil {
-		if a.SnapshotID != snapshotID {
+		if a.SnapshotID != snapshotID || a.Selection != selection {
 			return a, core.ErrConflict
 		}
 		if a.Status == "accepted" || a.Status == "blocked" {
@@ -159,9 +175,22 @@ func (s Service) Accept(ctx context.Context, snapshotID, key string) (a store.Ac
 	if err != nil {
 		return a, err
 	}
+	versions, err := s.Store.Snapshots(ctx, v.TaskID)
+	if err != nil {
+		return a, err
+	}
+	if len(versions) == 0 || versions[len(versions)-1].ID != v.ID {
+		return a, core.ErrConflict
+	}
+	if paths != nil {
+		v.Commit, err = workspace.SelectedCommit(ctx, repo.Root, d.Task.BaseCommit, v.Commit, paths)
+		if err != nil {
+			return a, err
+		}
+	}
 	if m.IsSnapshot(d.Task.RepositoryPath, repo.Root) {
 		recovering := a.Status == "applying" && a.ResultCommit == v.Commit
-		a = store.Acceptance{ID: id, SnapshotID: v.ID, TaskID: v.TaskID, Status: "applying", SourceHead: d.Task.BaseCommit, ResultCommit: v.Commit}
+		a = store.Acceptance{ID: id, Selection: selection, SnapshotID: v.ID, TaskID: v.TaskID, Status: "applying", SourceHead: d.Task.BaseCommit, ResultCommit: v.Commit}
 		if err = s.Store.SaveAcceptance(ctx, a); err != nil {
 			return a, err
 		}
@@ -191,7 +220,10 @@ func (s Service) Accept(ctx context.Context, snapshotID, key string) (a store.Ac
 		}
 
 	}
-	a = store.Acceptance{ID: id, SnapshotID: v.ID, TaskID: v.TaskID, Status: "integrating", IntegrationPath: filepath.Join(s.DataDir, "integrations", v.ID)}
+	a = store.Acceptance{ID: id, Selection: selection, SnapshotID: v.ID, TaskID: v.TaskID, Status: "integrating", IntegrationPath: filepath.Join(s.DataDir, "integrations", v.ID)}
+	if selection != "" {
+		a.IntegrationPath += "-" + selection
+	}
 	block := func(reason string) (store.Acceptance, error) {
 		a.Status = "blocked"
 		a.Reason = reason

@@ -8,14 +8,15 @@ import (
 )
 
 type Snapshot struct {
-	ID         string            `json:"id"`
-	TaskID     string            `json:"task_id"`
-	TurnID     string            `json:"turn_id"`
-	Generation int64             `json:"generation"`
-	Commit     string            `json:"commit"`
-	Diff       string            `json:"diff"`
-	CreatedAt  string            `json:"created_at"`
-	Artifacts  []ArtifactVersion `json:"artifacts"`
+	ID               string            `json:"id"`
+	ParentSnapshotID string            `json:"parent_snapshot_id,omitempty"`
+	TaskID           string            `json:"task_id"`
+	TurnID           string            `json:"turn_id"`
+	Generation       int64             `json:"generation"`
+	Commit           string            `json:"commit"`
+	Diff             string            `json:"diff"`
+	CreatedAt        string            `json:"created_at"`
+	Artifacts        []ArtifactVersion `json:"artifacts"`
 }
 type ArtifactVersion struct {
 	ID         string `json:"id"`
@@ -29,6 +30,7 @@ type ArtifactVersion struct {
 	CreatedAt  string `json:"created_at"`
 }
 type Acceptance struct {
+	Selection       string `json:"-"`
 	ID              string `json:"id"`
 	SnapshotID      string `json:"snapshot_id"`
 	TaskID          string `json:"task_id"`
@@ -53,16 +55,20 @@ func (s *Store) SaveSnapshot(ctx context.Context, v Snapshot) error {
 		if gen != v.Generation || status != "running" {
 			return core.ErrStaleGeneration
 		}
-		if _, err := q.ExecContext(ctx, "INSERT INTO snapshots(id,task_id,turn_id,generation,commit_id,diff,created_at) VALUES(?,?,?,?,?,?,?)", v.ID, v.TaskID, v.TurnID, v.Generation, v.Commit, v.Diff, v.CreatedAt); err != nil {
+		return insertSnapshot(ctx, q, v, v.TurnID)
+	})
+}
+
+func insertSnapshot(ctx context.Context, q querier, v Snapshot, key string) error {
+	if _, err := q.ExecContext(ctx, "INSERT INTO snapshots(id,task_id,turn_id,generation,commit_id,diff,created_at,capture_key,parent_snapshot_id) VALUES(?,?,?,?,?,?,?,?,?)", v.ID, v.TaskID, v.TurnID, v.Generation, v.Commit, v.Diff, v.CreatedAt, key, v.ParentSnapshotID); err != nil {
+		return err
+	}
+	for _, a := range v.Artifacts {
+		if _, err := q.ExecContext(ctx, "INSERT INTO artifact_versions(id,snapshot_id,task_id,turn_id,path,hash,size,mime,created_at) VALUES(?,?,?,?,?,?,?,?,?)", a.ID, v.ID, v.TaskID, v.TurnID, a.Path, a.Hash, a.Size, a.MIME, v.CreatedAt); err != nil {
 			return err
 		}
-		for _, a := range v.Artifacts {
-			if _, err := q.ExecContext(ctx, "INSERT INTO artifact_versions(id,snapshot_id,task_id,turn_id,path,hash,size,mime,created_at) VALUES(?,?,?,?,?,?,?,?,?)", a.ID, v.ID, v.TaskID, v.TurnID, a.Path, a.Hash, a.Size, a.MIME, v.CreatedAt); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // AddSnapshotArtifacts indexes additional representations of a completed,
@@ -109,14 +115,14 @@ func (s *Store) Snapshots(ctx context.Context, taskID string) ([]Snapshot, error
 	if err := taskVisible(ctx, s.db, taskID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT id,task_id,turn_id,generation,commit_id,diff,created_at FROM snapshots WHERE task_id=? ORDER BY created_at", taskID)
+	rows, err := s.db.QueryContext(ctx, "SELECT id,task_id,turn_id,generation,commit_id,diff,created_at,parent_snapshot_id FROM snapshots WHERE task_id=? ORDER BY rowid", taskID)
 	if err != nil {
 		return nil, err
 	}
 	var out = []Snapshot{}
 	for rows.Next() {
 		var v Snapshot
-		if err = rows.Scan(&v.ID, &v.TaskID, &v.TurnID, &v.Generation, &v.Commit, &v.Diff, &v.CreatedAt); err != nil {
+		if err = rows.Scan(&v.ID, &v.TaskID, &v.TurnID, &v.Generation, &v.Commit, &v.Diff, &v.CreatedAt, &v.ParentSnapshotID); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -137,7 +143,7 @@ func (s *Store) Snapshots(ctx context.Context, taskID string) ([]Snapshot, error
 }
 func (s *Store) Snapshot(ctx context.Context, id string) (Snapshot, error) {
 	var v Snapshot
-	err := s.db.QueryRowContext(ctx, "SELECT id,task_id,turn_id,generation,commit_id,diff,created_at FROM snapshots WHERE id=?", id).Scan(&v.ID, &v.TaskID, &v.TurnID, &v.Generation, &v.Commit, &v.Diff, &v.CreatedAt)
+	err := s.db.QueryRowContext(ctx, "SELECT id,task_id,turn_id,generation,commit_id,diff,created_at,parent_snapshot_id FROM snapshots WHERE id=?", id).Scan(&v.ID, &v.TaskID, &v.TurnID, &v.Generation, &v.Commit, &v.Diff, &v.CreatedAt, &v.ParentSnapshotID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, core.ErrNotFound
 	}
@@ -176,13 +182,13 @@ func (s *Store) Artifact(ctx context.Context, id string) (a ArtifactVersion, err
 	return
 }
 func (s *Store) GetAcceptance(ctx context.Context, id string) (v Acceptance, err error) {
-	err = s.db.QueryRowContext(ctx, "SELECT id,snapshot_id,task_id,status,source_head,result_commit,integration_path,reason,updated_at FROM acceptances WHERE id=?", id).Scan(&v.ID, &v.SnapshotID, &v.TaskID, &v.Status, &v.SourceHead, &v.ResultCommit, &v.IntegrationPath, &v.Reason, &v.UpdatedAt)
+	err = s.db.QueryRowContext(ctx, "SELECT id,snapshot_id,task_id,status,source_head,result_commit,integration_path,reason,updated_at,selection FROM acceptances WHERE id=?", id).Scan(&v.ID, &v.SnapshotID, &v.TaskID, &v.Status, &v.SourceHead, &v.ResultCommit, &v.IntegrationPath, &v.Reason, &v.UpdatedAt, &v.Selection)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = core.ErrNotFound
 	}
 	return
 }
 func (s *Store) SaveAcceptance(ctx context.Context, v Acceptance) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO acceptances(id,snapshot_id,task_id,status,source_head,result_commit,integration_path,reason,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,source_head=excluded.source_head,result_commit=excluded.result_commit,integration_path=excluded.integration_path,reason=excluded.reason,updated_at=excluded.updated_at`, v.ID, v.SnapshotID, v.TaskID, v.Status, v.SourceHead, v.ResultCommit, v.IntegrationPath, v.Reason, core.Now())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO acceptances(id,snapshot_id,task_id,status,source_head,result_commit,integration_path,reason,updated_at,selection) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,source_head=excluded.source_head,result_commit=excluded.result_commit,integration_path=excluded.integration_path,reason=excluded.reason,updated_at=excluded.updated_at`, v.ID, v.SnapshotID, v.TaskID, v.Status, v.SourceHead, v.ResultCommit, v.IntegrationPath, v.Reason, core.Now(), v.Selection)
 	return err
 }

@@ -197,7 +197,7 @@ func (s *claudeState) consume(raw []byte) error {
 			if strings.Contains(lower, "auth") || strings.Contains(lower, "api key") || strings.Contains(lower, "login") {
 				code = "claude_auth_required"
 			} else if strings.Contains(lower, "429") || strings.Contains(lower, "quota") || strings.Contains(message, "套餐已到期") {
-				code = "claude_provider_unavailable"
+				code = "claude_usage_limit"
 			}
 			return executionError(code, core.OutputTail(message), nil)
 		}

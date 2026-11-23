@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -71,6 +72,17 @@ func ReapRecorded(dataDir string) error {
 			force()
 
 		}
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			e := ConfirmStopped(filepath.Dir(path))
+			if e == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				return e
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 		if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -78,6 +90,36 @@ func ReapRecorded(dataDir string) error {
 	return nil
 }
 
+// ConfirmStopped retains the record when process inspection fails. A missing
+// record, a missing PID, or a reused PID cannot refer to this owned process.
+func ConfirmStopped(directory string) error {
+	b, err := os.ReadFile(filepath.Join(directory, "app-server-process.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var r processRecord
+	if err = json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	if r.PID <= 1 || r.Stamp == "" {
+		return fmt.Errorf("invalid process identity")
+	}
+	stamp, err := processStamp(r.PID)
+	var exited *exec.ExitError
+	if errors.As(err, &exited) && exited.ExitCode() == 1 {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if stamp == r.Stamp {
+		return fmt.Errorf("recorded process %d is still running", r.PID)
+	}
+	return nil
+}
 func RecordedAlive(directory string) bool {
 	b, e := os.ReadFile(filepath.Join(directory, "app-server-process.json"))
 	if e != nil {
@@ -100,10 +142,21 @@ func StopRecorded(directory string) error {
 		return e
 	}
 	var r processRecord
-	if e = json.Unmarshal(b, &r); e != nil || r.PID <= 1 {
+	if e = json.Unmarshal(b, &r); e != nil || r.PID <= 1 || r.Stamp == "" {
 		return fmt.Errorf("invalid process record")
 	}
-	if stamp, e := processStamp(r.PID); e != nil || stamp != r.Stamp {
+	if e := ConfirmStopped(directory); e == nil {
+		err := os.Remove(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	stamp, e := processStamp(r.PID)
+	if e != nil {
+		return e
+	}
+	if stamp != r.Stamp {
 		_ = os.Remove(path)
 		return nil
 	}
@@ -115,13 +168,25 @@ func StopRecorded(directory string) error {
 	_ = TerminateTree(cmd, false)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if !RecordedAlive(directory) {
+		if ConfirmStopped(directory) == nil {
 			_ = os.Remove(path)
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	_ = TerminateTree(cmd, true)
-	_ = os.Remove(path)
-	return nil
+	if e := TerminateTree(cmd, true); e != nil {
+		return e
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		e := ConfirmStopped(directory)
+		if e == nil {
+			_ = os.Remove(path)
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return e
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }

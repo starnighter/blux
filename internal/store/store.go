@@ -62,7 +62,16 @@ var deletionMigration string
 //go:embed migrations/014_pins.sql
 var pinsMigration string
 
-const SchemaVersion = 14
+//go:embed migrations/015_tickets.sql
+var ticketMigration string
+
+//go:embed migrations/017_workbench.sql
+var workbenchMigration string
+
+//go:embed migrations/018_selections.sql
+var selectionMigration string
+
+const SchemaVersion = 18
 
 type Store struct{ db *sql.DB }
 
@@ -115,7 +124,7 @@ func Open(path string) (*Store, error) {
 				return err
 			}
 			if version > SchemaVersion {
-				return fmt.Errorf("database schema version %d is newer than supported version 9", version)
+				return fmt.Errorf("database schema version %d is newer than supported version %d", version, SchemaVersion)
 			}
 			if version == 0 {
 				if _, err := q.ExecContext(initializationCtx, initialMigration); err != nil {
@@ -232,6 +241,21 @@ func Open(path string) (*Store, error) {
 					return err
 				}
 			}
+			for _, migration := range []struct {
+				number int
+				sql    string
+			}{{15, ticketMigration}, {17, workbenchMigration}, {18, selectionMigration}} {
+				if version >= migration.number {
+					continue
+				}
+				if _, err := q.ExecContext(initializationCtx, migration.sql); err != nil {
+					return fmt.Errorf("migration %d: %w", migration.number, err)
+				}
+				if _, err := q.ExecContext(initializationCtx, fmt.Sprintf("PRAGMA user_version = %d", migration.number)); err != nil {
+					return err
+				}
+			}
+
 			return nil
 		})
 	}); err != nil {
@@ -390,10 +414,29 @@ func normalizeTaskInput(in core.CreateTaskInput) (core.CreateTaskInput, error) {
 }
 
 func taskCreationDigest(in core.CreateTaskInput) string {
+	if len(in.TicketDependencies) > 0 || in.AcceptanceCriteria != "" || in.TicketGoal != "" {
+		goal := in.TicketGoal
+		in.TicketGoal = ""
+		deps, criteria := in.TicketDependencies, in.AcceptanceCriteria
+		in.TicketDependencies, in.AcceptanceCriteria = nil, ""
+		return digest(struct {
+			Hash         string
+			Dependencies []string
+			Criteria     string
+			Goal         string
+		}{taskCreationDigest(in), deps, criteria, goal})
+	}
 	if in.ReasoningEffort != "" {
 		effort := in.ReasoningEffort
 		in.ReasoningEffort = ""
 		return digest(struct{ Hash, Effort string }{taskCreationDigest(in), effort})
+	}
+	if in.PinnedInputs {
+		in.PinnedInputs = false
+		return digest(struct {
+			Hash     string
+			Versions []string
+		}{taskCreationDigest(in), in.InputArtifacts})
 	}
 	if in.CollaborationID != "" {
 		id := in.CollaborationID
@@ -498,6 +541,11 @@ func (s *Store) CreateTask(ctx context.Context, in core.CreateTaskInput) (core.T
 		if _, err = appendEvent(ctx, q, core.EventInput{TaskID: taskID, SessionID: sessionID, TurnID: turnID, Generation: 1, Type: "task.created", Payload: payload}); err != nil {
 			return err
 		}
+		if !in.Manager {
+			if err = createTicket(ctx, q, taskID, in); err != nil {
+				return err
+			}
+		}
 		if err = queueTurn(ctx, q, taskID, sessionID, turnID, in.Prompt, 1, in.Model, in.ModelProvider, in.ReasoningEffort); err != nil {
 			return err
 		}
@@ -566,6 +614,12 @@ func (s *Store) CreateTurn(ctx context.Context, taskID string, in core.CreateTur
 		if active != 0 {
 			return fmt.Errorf("session already has an active turn: %w", core.ErrConflict)
 		}
+		if err := taskVisible(ctx, q, taskID); err != nil {
+			return err
+		}
+		if err := continueTicket(ctx, q, taskID); err != nil {
+			return err
+		}
 		turnID := core.NewID("turn")
 		if err = queueTurn(ctx, q, taskID, sessionID, turnID, in.Prompt, 1, in.Model, in.ModelProvider, in.ReasoningEffort); err != nil {
 			return err
@@ -614,6 +668,13 @@ func queueTurn(ctx context.Context, q querier, taskID, sessionID, turnID, prompt
 	if effort == "" {
 		effort = runtime.ReasoningEffort
 	}
+	var switched bool
+	if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM events WHERE task_id=? AND turn_id=? AND type='ticket.engine_switched')", taskID, turnID).Scan(&switched); err != nil {
+		return err
+	}
+	if switched {
+		effort = ""
+	}
 	if len(selection) > 0 && selection[0] != "" && selection[0] != runtime.Model {
 		effort = ""
 	}
@@ -631,13 +692,13 @@ func queueTurn(ctx context.Context, q querier, taskID, sessionID, turnID, prompt
 	return err
 }
 
-const taskColumns = "id,title,prompt,status,adapter,session_id,current_turn_id,created_at,updated_at,last_event_seq,repository_path,base_commit,model,model_provider,COALESCE((SELECT collaboration_id FROM collaboration_tasks ct WHERE ct.task_id=tasks.id),''),COALESCE((SELECT pinned_at FROM pins WHERE kind='task' AND entity_id=tasks.id),'')"
+const taskColumns = "id,title,prompt,status,adapter,session_id,current_turn_id,created_at,updated_at,last_event_seq,repository_path,base_commit,model,model_provider,COALESCE((SELECT collaboration_id FROM collaboration_tasks ct WHERE ct.task_id=tasks.id),''),COALESCE((SELECT pinned_at FROM pins WHERE kind='task' AND entity_id=tasks.id),''),COALESCE((SELECT status FROM tickets k WHERE k.id=tasks.id),'')"
 
 type scanner interface{ Scan(...any) error }
 
 func scanTask(row scanner) (core.Task, error) {
 	var t core.Task
-	err := row.Scan(&t.ID, &t.Title, &t.Prompt, &t.Status, &t.Adapter, &t.SessionID, &t.CurrentTurnID, &t.CreatedAt, &t.UpdatedAt, &t.LastEventSeq, &t.RepositoryPath, &t.BaseCommit, &t.Model, &t.ModelProvider, &t.CollaborationID, &t.PinnedAt)
+	err := row.Scan(&t.ID, &t.Title, &t.Prompt, &t.Status, &t.Adapter, &t.SessionID, &t.CurrentTurnID, &t.CreatedAt, &t.UpdatedAt, &t.LastEventSeq, &t.RepositoryPath, &t.BaseCommit, &t.Model, &t.ModelProvider, &t.CollaborationID, &t.PinnedAt, &t.TicketStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = core.ErrNotFound
 	}

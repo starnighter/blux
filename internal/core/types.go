@@ -33,22 +33,26 @@ const (
 )
 
 type CreateTaskInput struct {
-	ReasoningEffort string   `json:"reasoning_effort,omitempty"`
-	CollaborationID string   `json:"collaboration_id,omitempty"`
-	Manager         bool     `json:"manager"`
-	DeliveryID      string   `json:"delivery_id"`
-	FlowGeneration  int64    `json:"flow_generation"`
-	InputArtifacts  []string `json:"input_artifacts"`
-	Mode            string   `json:"mode"`
-	ContextIDs      []string `json:"context_ids"`
-	Title           string   `json:"title"`
-	Prompt          string   `json:"prompt"`
-	IdempotencyKey  string   `json:"idempotency_key"`
-	Adapter         string   `json:"adapter"`
-	RepositoryPath  string   `json:"repository_path"`
-	BaseCommit      string   `json:"base_commit"`
-	Model           string   `json:"model"`
-	ModelProvider   string   `json:"model_provider"`
+	TicketGoal         string   `json:"ticket_goal,omitempty"`
+	PinnedInputs       bool     `json:"-"`
+	TicketDependencies []string `json:"ticket_dependencies,omitempty"`
+	AcceptanceCriteria string   `json:"acceptance_criteria,omitempty"`
+	ReasoningEffort    string   `json:"reasoning_effort,omitempty"`
+	CollaborationID    string   `json:"collaboration_id,omitempty"`
+	Manager            bool     `json:"manager"`
+	DeliveryID         string   `json:"delivery_id"`
+	FlowGeneration     int64    `json:"flow_generation"`
+	InputArtifacts     []string `json:"input_artifacts"`
+	Mode               string   `json:"mode"`
+	ContextIDs         []string `json:"context_ids"`
+	Title              string   `json:"title"`
+	Prompt             string   `json:"prompt"`
+	IdempotencyKey     string   `json:"idempotency_key"`
+	Adapter            string   `json:"adapter"`
+	RepositoryPath     string   `json:"repository_path"`
+	BaseCommit         string   `json:"base_commit"`
+	Model              string   `json:"model"`
+	ModelProvider      string   `json:"model_provider"`
 }
 
 type CreateTurnInput struct {
@@ -61,6 +65,7 @@ type CreateTurnInput struct {
 }
 
 type Task struct {
+	TicketStatus    string `json:"ticket_status,omitempty"`
 	PinnedAt        string `json:"pinned_at,omitempty"`
 	CollaborationID string `json:"collaboration_id,omitempty"`
 	ID              string `json:"id"`

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EnginePolicy from './EnginePolicy.svelte';
   import Select from './Select.svelte';
   import ProjectBranch from './ProjectBranch.svelte';
   import { agentOptions, type AgentInfo } from '$lib/blux/agents';
@@ -44,6 +45,9 @@
       <div class="setup-field"><label for="setup-adapter">执行器</label>
         <Select id="setup-adapter" ariaLabel="执行器" bind:value={adapter} options={agentOptions(agents)} disabled={locked}/>
       </div>
+    {/if}
+    {#if !manager && agents.some(a => a.id === adapter)}
+      <EnginePolicy info={agents.find(a => a.id === adapter)}/>
     {/if}
     {#if project}<ContextPanel {project} manageOnly />{/if}
     {#if error}<p class="inline-error" role="alert">{error}</p>{/if}

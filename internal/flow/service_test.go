@@ -52,6 +52,10 @@ func finishJobs(t *testing.T, s Service, failedVerification bool, code string) {
 			name = "Implementation.md"
 		}
 		os.WriteFile(filepath.Join(rt.WorkspacePath, "artifacts", name), []byte(text), 0600)
+		if pack.Mode.ID == "development" {
+			writeResult(t, filepath.Join(rt.WorkspacePath, "artifacts"), "Verification.md", "Checks ran")
+			writeResult(t, filepath.Join(rt.WorkspacePath, "artifacts"), "Verification.json", `{"passed":true}`)
+		}
 		if failedVerification && pack.Mode.ID == "development" {
 			os.WriteFile(filepath.Join(rt.WorkspacePath, "artifacts", "Verification.json"), []byte(`{"passed":false,"feedback":"test failed"}`), 0600)
 		}

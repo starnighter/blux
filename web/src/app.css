@@ -99,7 +99,6 @@ h1, h2, h3, h4, p { margin: 0; }
 .message-actions { display: flex; margin: 5px 0 0 -6px; opacity: .35; }
 .assistant-message:hover .message-actions, .message-actions:focus-within { opacity: 1; }
 .message-actions .ui-icon-button { height: 27px; min-width: 27px; padding: 6px; color: var(--ui-muted); }
-.conversation-progress { display: flex; align-items: center; gap: 7px; margin-top: 17px; font-size: 11px; color: var(--ui-faint); }
 .chat-loading { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 25px; color: var(--ui-muted); font-size: 12px; }
 .connection-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 25px 10px; padding: 9px 12px; border-radius: 7px; background: var(--ui-error-bg); color: var(--ui-error); font-size: 11px; line-height: 1.7; }
 .connection-banner button { display: flex; align-items: center; gap: 5px; border: 0; background: none; color: inherit; font-size: 11px; flex-shrink: 0; }

@@ -14,6 +14,8 @@ type UnitTemplate struct {
 	Prompt string `json:"prompt"`
 }
 type PhaseTemplate struct {
+	Role      string         `json:"role,omitempty"`
+	Agent     string         `json:"agent,omitempty"`
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`
 	Mode      string         `json:"mode"`
@@ -28,16 +30,24 @@ type Template struct {
 	Name    string          `json:"name"`
 	Phases  []PhaseTemplate `json:"phases"`
 }
+type Execution struct {
+	TaskID  string `json:"task_id"`
+	Adapter string `json:"adapter"`
+	Reason  string `json:"reason"`
+}
 type Unit struct {
-	ID             string   `json:"id"`
-	TemplateID     string   `json:"template_id"`
-	Name           string   `json:"name"`
-	Prompt         string   `json:"prompt"`
-	TaskID         string   `json:"task_id"`
-	SnapshotID     string   `json:"snapshot_id"`
-	InputArtifacts []string `json:"input_artifacts"`
-	Status         string   `json:"status"`
-	Integrated     bool     `json:"integrated"`
+	Adapter        string      `json:"adapter,omitempty"`
+	BaseCommit     string      `json:"base_commit,omitempty"`
+	PreviousTasks  []Execution `json:"previous_tasks,omitempty"`
+	ID             string      `json:"id"`
+	TemplateID     string      `json:"template_id"`
+	Name           string      `json:"name"`
+	Prompt         string      `json:"prompt"`
+	TaskID         string      `json:"task_id"`
+	SnapshotID     string      `json:"snapshot_id"`
+	InputArtifacts []string    `json:"input_artifacts"`
+	Status         string      `json:"status"`
+	Integrated     bool        `json:"integrated"`
 }
 type Attempt struct {
 	ID       string `json:"id"`
@@ -46,6 +56,8 @@ type Attempt struct {
 	Feedback string `json:"feedback"`
 }
 type Phase struct {
+	Role       string   `json:"role,omitempty"`
+	Agent      string   `json:"agent,omitempty"`
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
 	Mode       string   `json:"mode"`
@@ -62,6 +74,18 @@ type FlowRun struct {
 	Phases     []Phase `json:"phases"`
 }
 type Delivery struct {
+	InputHead        string    `json:"input_head,omitempty"`
+	BlockedTask      string    `json:"blocked_task,omitempty"`
+	Summary          string    `json:"summary,omitempty"`
+	InputSnapshotIDs []string  `json:"input_snapshot_ids,omitempty"`
+	SourceHead       string    `json:"source_head,omitempty"`
+	Orchestration    string    `json:"orchestration,omitempty"`
+	Strategy         string    `json:"strategy,omitempty"`
+	Agents           []string  `json:"agents,omitempty"`
+	CollaborationID  string    `json:"collaboration_id,omitempty"`
+	Plan             *Plan     `json:"plan,omitempty"`
+	SelectedPaths    []string  `json:"selected_paths,omitempty"`
+	CandidateBase    string    `json:"candidate_base,omitempty"`
 	ID               string    `json:"id"`
 	Goal             string    `json:"goal"`
 	RepositoryPath   string    `json:"repository_path"`
@@ -120,7 +144,7 @@ func Validate(t Template) error {
 func NewRun(t Template, generation int64) FlowRun {
 	r := FlowRun{ID: core.NewID("flow"), Generation: generation, Phases: []Phase{}}
 	for _, p := range t.Phases {
-		phase := Phase{ID: p.ID, Name: p.Name, Mode: p.Mode, DependsOn: p.DependsOn, Gate: p.Gate, Verify: p.Verify, Status: "pending", Attempt: Attempt{ID: core.NewID("attempt"), Number: 1, Units: []Unit{}}}
+		phase := Phase{Role: p.Role, Agent: p.Agent, ID: p.ID, Name: p.Name, Mode: p.Mode, DependsOn: p.DependsOn, Gate: p.Gate, Verify: p.Verify, Status: "pending", Attempt: Attempt{ID: core.NewID("attempt"), Number: 1, Units: []Unit{}}}
 		for _, u := range p.Units {
 			phase.Attempt.Units = append(phase.Attempt.Units, Unit{ID: core.NewID("unit"), TemplateID: u.ID, Name: u.Name, Prompt: u.Prompt, Status: "pending", InputArtifacts: []string{}})
 		}

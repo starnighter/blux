@@ -9,11 +9,19 @@ import (
 
 var ErrUnsupported = errors.New("adapter capability is not available")
 
+var ErrTurnRejectedBeforeStart = errors.New("provider rejected turn before accepting execution")
+
 type Capabilities struct {
-	Streaming bool `json:"streaming"`
-	Resume    bool `json:"resume"`
-	Steer     bool `json:"steer"`
-	Interrupt bool `json:"interrupt"`
+	Sandbox        bool `json:"sandbox"`
+	Approval       bool `json:"approval"`
+	NetworkControl bool `json:"network_control"`
+	FileAccess     bool `json:"file_access"`
+	ToolControl    bool `json:"tool_control"`
+	UsageReporting bool `json:"usage_reporting"`
+	Streaming      bool `json:"streaming"`
+	Resume         bool `json:"resume"`
+	Steer          bool `json:"steer"`
+	Interrupt      bool `json:"interrupt"`
 }
 
 type SessionConfig struct {

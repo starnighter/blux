@@ -110,3 +110,80 @@ func TestVersionAndAcceptance(t *testing.T) {
 		})
 	}
 }
+
+func TestAcceptPathsIsScopedAndIdempotent(t *testing.T) {
+	for _, gitProject := range []bool{true, false} {
+		name := "directory"
+		if gitProject {
+			name = "repository"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			data, source := t.TempDir(), t.TempDir()
+			if gitProject {
+				if _, err := git(ctx, source, "init"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := git(ctx, source, "commit", "--allow-empty", "-m", "initial"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			m := workspace.Manager{DataDir: data}
+			base, err := m.Freeze(ctx, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db, err := store.Open(filepath.Join(data, "test.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			d, _, err := db.CreateTask(ctx, core.CreateTaskInput{Prompt: "prepare", RepositoryPath: source, BaseCommit: base.BaseCommit, IdempotencyKey: "fixture"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			job, err := db.ClaimNext(ctx, "worker")
+			if err != nil {
+				t.Fatal(err)
+			}
+			rt, err := m.Prepare(ctx, *job)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{"first", "second"} {
+				if err := os.WriteFile(filepath.Join(rt.WorktreePath, path), []byte(path+"\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			service := Service{DataDir: data, Store: db}
+			if err := service.Capture(ctx, *job, rt); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := db.AppendEvent(ctx, core.EventInput{TaskID: job.TaskID, SessionID: job.SessionID, TurnID: job.TurnID, Generation: job.Generation, Type: "turn.completed"}); err != nil {
+				t.Fatal(err)
+			}
+			versions, err := db.Snapshots(ctx, d.Task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := versions[0].ID
+			one, err := service.AcceptPaths(ctx, id, "first-key", []string{"first"})
+			if err != nil || one.Status != "accepted" {
+				t.Fatal(one, err)
+			}
+			two, err := service.AcceptPaths(ctx, id, "first-key", []string{"first"})
+			if err != nil || two.ID != one.ID || two.ResultCommit != one.ResultCommit {
+				t.Fatal(two, err)
+			}
+			if _, err := service.AcceptPaths(ctx, id, "first-key", []string{"second"}); err != core.ErrConflict {
+				t.Fatalf("changed request result: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(source, "second")); !os.IsNotExist(err) {
+				t.Fatalf("unselected path written: %v", err)
+			}
+			if got, err := os.ReadFile(filepath.Join(source, "first")); err != nil || string(got) != "first\n" {
+				t.Fatal(string(got), err)
+			}
+		})
+	}
+}

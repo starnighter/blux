@@ -132,3 +132,16 @@ func (s *Store) WorkflowDelivery(ctx context.Context, taskID string) (id string,
 	}
 	return
 }
+
+// CapturedTurnSnapshot selects the original execution result even if the
+// workbench subsequently saved human revisions derived from the same turn.
+func (s *Store) CapturedTurnSnapshot(ctx context.Context, turn string) (Snapshot, error) {
+	var id string
+	if err := s.db.QueryRowContext(ctx, "SELECT id FROM snapshots WHERE turn_id=? AND parent_snapshot_id=''", turn).Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Snapshot{}, core.ErrNotFound
+		}
+		return Snapshot{}, err
+	}
+	return s.Snapshot(ctx, id)
+}
