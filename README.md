@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web/static/favicon.svg" alt="Blux" width="80" />
+  <img src="web/static/blux-icon.png" alt="Blux" width="80" />
 </p>
 
 <h1 align="center">Blux</h1>
